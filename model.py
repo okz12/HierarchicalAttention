@@ -1,6 +1,8 @@
 import pytorch_lightning as pl
 from pytorch_lightning.metrics.functional import accuracy
+import torch
 import torch.nn as nn
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence, PackedSequence
 from torch.utils.data import DataLoader, random_split
 import torch.nn.functional as F
 from typing import List
@@ -25,11 +27,6 @@ class Preprocessor:
         words_per_sentence = att.sum(dim=1)
         words_per_sentence = nn.ConstantPad1d((0, sentence_pad_length), 0)(words_per_sentence)
         return tokens, sentences, words_per_sentence
-    
-    
-import torch
-import torch.nn as nn
-from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence, PackedSequence
 
 
 class HierarchicalAttentionNetwork(pl.LightningModule):
