@@ -2,7 +2,7 @@ import pytorch_lightning as pl
 from pytorch_lightning.metrics.functional import accuracy
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
-from torch.nn.functional import F
+import torch.nn.functional as F
 from typing import List
 
 
@@ -50,9 +50,9 @@ class HierarchicalAttentionNetwork(pl.LightningModule):
         word_att_size,
         sentence_att_size,
         dropout=0.5,
-        train_dataset,
-        valid_dataset,
-        test_dataset
+        train_dataset = None,
+        valid_dataset = None,
+        test_dataset = None
     ):
         """
         :param n_classes: number of classes
@@ -116,7 +116,8 @@ class HierarchicalAttentionNetwork(pl.LightningModule):
         optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, self.parameters()), lr=1e-3)
         return optimizer
 
-    def training_step(self, documents, sentences_per_document, words_per_sentence, labels):
+    def training_step(self, batch, batch_idx):
+        documents, sentences_per_document, words_per_sentence, labels = batch
         sentences_per_document = sentences_per_document.squeeze(1)
         words_per_sentence = words_per_sentence
         labels = labels.squeeze(1)
