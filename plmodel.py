@@ -1,4 +1,8 @@
+import pytorch_lightning as pl
+from pytorch_lightning.metrics.functional import accuracy
 import torch.nn as nn
+from torch.utils.data import DataLoader, random_split
+from torch.nn.functional import F
 from typing import List
 
 
@@ -28,7 +32,7 @@ import torch.nn as nn
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence, PackedSequence
 
 
-class HierarchicalAttentionNetwork(nn.Module):
+class HierarchicalAttentionNetwork(pl.LightningModule):
     """
     The overarching Hierarchial Attention Network (HAN).
     """
@@ -46,6 +50,9 @@ class HierarchicalAttentionNetwork(nn.Module):
         word_att_size,
         sentence_att_size,
         dropout=0.5,
+        train_dataset,
+        valid_dataset,
+        test_dataset
     ):
         """
         :param n_classes: number of classes
@@ -60,6 +67,10 @@ class HierarchicalAttentionNetwork(nn.Module):
         :param dropout: dropout
         """
         super(HierarchicalAttentionNetwork, self).__init__()
+        # PL elements
+        self.train_dataset = train_dataset
+        self.valid_dataset = valid_dataset
+        self.test_dataset = test_dataset
 
         # Sentence-level attention module (which will, in-turn, contain the word-level attention module)
         self.sentence_attention = SentenceAttention(
@@ -74,6 +85,7 @@ class HierarchicalAttentionNetwork(nn.Module):
             sentence_att_size,
             dropout,
         )
+
 
         # Classifier
         self.fc = nn.Linear(2 * sentence_rnn_size, n_classes)
@@ -100,6 +112,56 @@ class HierarchicalAttentionNetwork(nn.Module):
 
         return scores, word_alphas, sentence_alphas
 
+    def configure_optimizers(self):
+        optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, self.parameters()), lr=1e-3)
+        return optimizer
+
+    def training_step(self, documents, sentences_per_document, words_per_sentence, labels):
+        sentences_per_document = sentences_per_document.squeeze(1)
+        words_per_sentence = words_per_sentence
+        labels = labels.squeeze(1)
+        scores, word_alphas, sentence_alphas = self(documents, sentences_per_document, words_per_sentence)
+        loss = F.cross_entropy(scores, labels)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        documents, sentences_per_document, words_per_sentence, labels = batch
+        sentences_per_document = sentences_per_document.squeeze(1)
+        words_per_sentence = words_per_sentence
+        labels = labels.squeeze(1)
+        scores, word_alphas, sentence_alphas = self(documents, sentences_per_document, words_per_sentence)
+        loss = F.cross_entropy(scores, labels)
+        preds = torch.argmax(scores, dim=1)
+        acc = accuracy(preds, labels)
+
+        # Calling self.log will surface up scalars for you in TensorBoard
+        self.log('val_loss', loss, prog_bar=True)
+        self.log('val_acc', acc, prog_bar=True)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        documents, sentences_per_document, words_per_sentence, labels = batch
+        sentences_per_document = sentences_per_document.squeeze(1)
+        words_per_sentence = words_per_sentence
+        labels = labels.squeeze(1)
+        scores, word_alphas, sentence_alphas = self(documents, sentences_per_document, words_per_sentence)
+        loss = F.cross_entropy(scores, labels)
+        preds = torch.argmax(scores, dim=1)
+        acc = accuracy(preds, labels)
+
+        # Calling self.log will surface up scalars for you in TensorBoard
+        self.log('test_loss', loss, prog_bar=True)
+        self.log('test_acc', acc, prog_bar=True)
+        return loss
+
+    def train_dataloader(self):
+        return DataLoader(self.train_dataset, batch_size=32, shuffle=True)
+
+    def val_dataloader(self):
+        return DataLoader(self.valid_dataset, batch_size=32, shuffle=False)
+
+    def test_dataloader(self):
+        return DataLoader(self.test_dataset, batch_size=32, shuffle=False)
 
 class SentenceAttention(nn.Module):
     """
@@ -292,9 +354,6 @@ class WordAttention(nn.Module):
         """
         super(WordAttention, self).__init__()
 
-        # Embeddings (look-up) layer
-        #         self.embeddings = nn.Embedding(embedding_layer.shape[0], embedding_layer.shape[1], padding_idx=0)
-        #         self.embeddings.weight = nn.Parameter(embedding_layer)
         self.embeddings = embedding_layer
 
         # Fine tune embedding layer
