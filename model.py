@@ -49,7 +49,9 @@ class HierarchicalAttentionNetwork(pl.LightningModule):
         dropout=0.5,
         train_dataset = None,
         valid_dataset = None,
-        test_dataset = None
+        test_dataset = None,
+        batch_size = 32,
+        lr = 1e-3
     ):
         """
         :param n_classes: number of classes
@@ -68,6 +70,8 @@ class HierarchicalAttentionNetwork(pl.LightningModule):
         self.train_dataset = train_dataset
         self.valid_dataset = valid_dataset
         self.test_dataset = test_dataset
+        self.batch_size = batch_size
+        self.lr = lr
 
         # Sentence-level attention module (which will, in-turn, contain the word-level attention module)
         self.sentence_attention = SentenceAttention(
@@ -110,7 +114,7 @@ class HierarchicalAttentionNetwork(pl.LightningModule):
         return scores, word_alphas, sentence_alphas
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, self.parameters()), lr=1e-3)
+        optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, self.parameters()), lr=self.lr)
         return optimizer
     
     def step(self, batch):
@@ -143,13 +147,13 @@ class HierarchicalAttentionNetwork(pl.LightningModule):
         return loss
 
     def train_dataloader(self):
-        return DataLoader(self.train_dataset, batch_size=32, shuffle=True)
+        return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True)
 
     def val_dataloader(self):
-        return DataLoader(self.valid_dataset, batch_size=32, shuffle=False)
+        return DataLoader(self.valid_dataset, batch_size=self.batch_size, shuffle=False)
 
     def test_dataloader(self):
-        return DataLoader(self.test_dataset, batch_size=32, shuffle=False)
+        return DataLoader(self.test_dataset, batch_size=self.batch_size, shuffle=False)
 
 class SentenceAttention(nn.Module):
     """
