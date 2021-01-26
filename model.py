@@ -9,18 +9,21 @@ from typing import List
 
 
 class Preprocessor:
-
     def __init__(self, sentence_tokenizer, word_tokenizer):
         self.sentence_tokenizer = sentence_tokenizer
         self.word_tokenizer = word_tokenizer
 
     def encode_document(self, document: List[List[str]], max_words: int = 20, max_sentences: int = 15):
         sentences = self.sentence_tokenizer.tokenize(document)
-        encoded = self.word_tokenizer.batch_encode_plus(batch_text_or_text_pairs=sentences[:max_sentences],
-                                                        add_special_tokens=False,
-                                                        padding='max_length', truncation=True, max_length=max_words,
-                                                        return_tensors='pt')
-        tokens, att = encoded['input_ids'], encoded['attention_mask']
+        encoded = self.word_tokenizer.batch_encode_plus(
+            batch_text_or_text_pairs=sentences[:max_sentences],
+            add_special_tokens=False,
+            padding="max_length",
+            truncation=True,
+            max_length=max_words,
+            return_tensors="pt",
+        )
+        tokens, att = encoded["input_ids"], encoded["attention_mask"]
         sentence_pad_length = max_sentences - tokens.shape[0]
         tokens = nn.ZeroPad2d((0, 0, 0, sentence_pad_length))(tokens)
         sentences = min(max_sentences, len(sentences))
@@ -47,11 +50,11 @@ class HierarchicalAttentionNetwork(pl.LightningModule):
         word_att_size,
         sentence_att_size,
         dropout=0.5,
-        train_dataset = None,
-        valid_dataset = None,
-        test_dataset = None,
-        batch_size = 32,
-        lr = 1e-3
+        train_dataset=None,
+        valid_dataset=None,
+        test_dataset=None,
+        batch_size=32,
+        lr=1e-3,
     ):
         """
         :param n_classes: number of classes
@@ -73,7 +76,6 @@ class HierarchicalAttentionNetwork(pl.LightningModule):
         self.batch_size = batch_size
         self.lr = lr
 
-        # Sentence-level attention module (which will, in-turn, contain the word-level attention module)
         self.sentence_attention = SentenceAttention(
             embedding_layer,
             embedding_size,
@@ -87,8 +89,6 @@ class HierarchicalAttentionNetwork(pl.LightningModule):
             dropout,
         )
 
-
-        # Classifier
         self.fc = nn.Linear(2 * sentence_rnn_size, n_classes)
 
         self.dropout = nn.Dropout(dropout)
@@ -102,21 +102,18 @@ class HierarchicalAttentionNetwork(pl.LightningModule):
         :param words_per_sentence: sentence lengths, a tensor of dimensions (n_documents, sent_pad_len)
         :return: class scores, attention weights of words, attention weights of sentences
         """
-        # Apply sentence-level attention module (and in turn, word-level attention module) to get document embeddings
         document_embeddings, word_alphas, sentence_alphas = self.sentence_attention(
             documents, sentences_per_document, words_per_sentence
         )
-        # (n_documents, 2 * sentence_rnn_size), (n_documents, max(sentences_per_document), max(words_per_sentence)), (n_documents, max(sentences_per_document))
 
-        # Classify
-        scores = self.fc(self.dropout(document_embeddings))  # (n_documents, n_classes)
+        scores = self.fc(self.dropout(document_embeddings))
 
         return scores, word_alphas, sentence_alphas
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, self.parameters()), lr=self.lr)
         return optimizer
-    
+
     def step(self, batch):
         documents, sentences_per_document, words_per_sentence, labels = batch
         sentences_per_document = sentences_per_document.squeeze(1)
@@ -130,20 +127,20 @@ class HierarchicalAttentionNetwork(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         acc, loss = self.step(batch)
-        self.log('train_loss', loss, prog_bar=False)
-        self.log('train_acc', acc, prog_bar=False)
+        self.log("train_loss", loss, prog_bar=False)
+        self.log("train_acc", acc, prog_bar=False)
         return loss
 
     def test_step(self, batch, batch_idx):
         acc, loss = self.step(batch)
-        self.log('test_loss', loss, prog_bar=False)
-        self.log('test_acc', acc, prog_bar=False)
+        self.log("test_loss", loss, prog_bar=False)
+        self.log("test_acc", acc, prog_bar=False)
         return loss
 
     def validation_step(self, batch, batch_idx):
         acc, loss = self.step(batch)
-        self.log('val_loss', loss, prog_bar=True)
-        self.log('val_acc', acc, prog_bar=True)
+        self.log("val_loss", loss, prog_bar=True)
+        self.log("val_acc", acc, prog_bar=True)
         return loss
 
     def train_dataloader(self):
@@ -154,6 +151,7 @@ class HierarchicalAttentionNetwork(pl.LightningModule):
 
     def test_dataloader(self):
         return DataLoader(self.test_dataset, batch_size=self.batch_size, shuffle=False)
+
 
 class SentenceAttention(nn.Module):
     """
@@ -186,7 +184,6 @@ class SentenceAttention(nn.Module):
         """
         super(SentenceAttention, self).__init__()
 
-        # Word-level attention module
         self.word_attention = WordAttention(
             embedding_layer,
             embedding_size,
@@ -196,8 +193,6 @@ class SentenceAttention(nn.Module):
             word_att_size,
             dropout,
         )
-
-        # Bidirectional sentence-level RNN
         self.sentence_rnn = nn.GRU(
             input_size=2 * word_rnn_size,
             hidden_size=sentence_rnn_size,
@@ -206,18 +201,8 @@ class SentenceAttention(nn.Module):
             dropout=dropout,
             batch_first=True,
         )
-
-        # Sentence-level attention network
-        self.sentence_attention = nn.Linear(
-            in_features=2 * sentence_rnn_size, out_features=sentence_att_size
-        )
-
-        # Sentence context vector to take dot-product with
-        self.sentence_context_vector = nn.Linear(
-            in_features=sentence_att_size, out_features=1, bias=False
-        )  # this performs a dot product with the linear layer's 1D parameter vector, which is the sentence context vector
-
-        # Dropout
+        self.sentence_attention = nn.Linear(in_features=2 * sentence_rnn_size, out_features=sentence_att_size)
+        self.sentence_context_vector = nn.Linear(in_features=sentence_att_size, out_features=1, bias=False)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, documents, sentences_per_document, words_per_sentence):
@@ -230,92 +215,59 @@ class SentenceAttention(nn.Module):
         :return: document embeddings, attention weights of words, attention weights of sentences
         """
 
-        # Re-arrange as sentences by removing sentence-pads (DOCUMENTS -> SENTENCES)
+        # on packing / padding sequences: https://stackoverflow.com/questions/51030782/why-do-we-pack-the-sequences-in-pytorch
+
+        # Apply word attention to get sentence embeddings
         packed_sentences = pack_padded_sequence(
             input=documents,
             lengths=sentences_per_document.tolist(),
             batch_first=True,
             enforce_sorted=False,
-        )  # a PackedSequence object, where 'data' is the flattened sentences (n_sentences, word_pad_len)
-
-        # Re-arrange sentence lengths in the same way (DOCUMENTS -> SENTENCES)
+        )
         packed_words_per_sentence = pack_padded_sequence(
             input=words_per_sentence,
             lengths=sentences_per_document.tolist(),
             batch_first=True,
             enforce_sorted=False,
-        )  # a PackedSequence object, where 'data' is the flattened sentence lengths (n_sentences)
-
-        # Find sentence embeddings by applying the word-level attention module
-        sentences, word_alphas = self.word_attention(
-            packed_sentences.data, packed_words_per_sentence.data
-        )  # (n_sentences, 2 * word_rnn_size), (n_sentences, max(words_per_sentence))
+        )
+        sentences, word_alphas = self.word_attention(packed_sentences.data, packed_words_per_sentence.data)
         sentences = self.dropout(sentences)
 
-        # Apply the sentence-level RNN over the sentence embeddings (PyTorch automatically applies it on the PackedSequence)
-        packed_sentences, _ = self.sentence_rnn(
-            PackedSequence(
+        # Pack sentences to apply attention
+        packed_sentences = PackedSequence(
                 data=sentences,
                 batch_sizes=packed_sentences.batch_sizes,
                 sorted_indices=packed_sentences.sorted_indices,
                 unsorted_indices=packed_sentences.unsorted_indices,
             )
-        )  # a PackedSequence object, where 'data' is the output of the RNN (n_sentences, 2 * sentence_rnn_size)
+        packed_sentences, _ = self.sentence_rnn(packed_sentences)
 
-        # Find attention vectors by applying the attention linear layer on the output of the RNN
-        att_s = self.sentence_attention(
-            packed_sentences.data
-        )  # (n_sentences, att_size)
-        att_s = torch.tanh(att_s)  # (n_sentences, att_size)
-        # Take the dot-product of the attention vectors with the context vector (i.e. parameter of linear layer)
-        att_s = self.sentence_context_vector(att_s).squeeze(1)  # (n_sentences)
+        # Apply sentence attention
+        att_s = torch.tanh(self.sentence_attention(packed_sentences.data))
+        att_s = self.sentence_context_vector(att_s).squeeze(1)
+        att_s = torch.exp(att_s - att_s.max())
 
-        # Compute softmax over the dot-product manually
-        # Manually because they have to be computed only over sentences in the same document
-
-        # First, take the exponent
-        max_value = (
-            att_s.max()
-        )  # scalar, for numerical stability during exponent calculation
-        att_s = torch.exp(att_s - max_value)  # (n_sentences)
-
-        # Re-arrange as documents by re-padding with 0s (SENTENCES -> DOCUMENTS)
-        att_s, _ = pad_packed_sequence(
-            PackedSequence(
+        packed_att = PackedSequence(
                 data=att_s,
                 batch_sizes=packed_sentences.batch_sizes,
                 sorted_indices=packed_sentences.sorted_indices,
                 unsorted_indices=packed_sentences.unsorted_indices,
-            ),
-            batch_first=True,
-        )  # (n_documents, max(sentences_per_document))
+            )
+        att_s, _ = pad_packed_sequence(packed_att, batch_first=True)
 
-        # Calculate softmax values as now sentences are arranged in their respective documents
-        sentence_alphas = att_s / torch.sum(
-            att_s, dim=1, keepdim=True
-        )  # (n_documents, max(sentences_per_document))
+        # Generate document embedding
+        sentence_alphas = att_s / torch.sum(att_s, dim=1, keepdim=True)
+        documents, _ = pad_packed_sequence(packed_sentences, batch_first=True)
+        documents = documents * sentence_alphas.unsqueeze(2)
+        documents = documents.sum(dim=1)
 
-        # Similarly re-arrange sentence-level RNN outputs as documents by re-padding with 0s (SENTENCES -> DOCUMENTS)
-        documents, _ = pad_packed_sequence(
-            packed_sentences, batch_first=True
-        )  # (n_documents, max(sentences_per_document), 2 * sentence_rnn_size)
-
-        # Find document embeddings
-        documents = documents * sentence_alphas.unsqueeze(
-            2
-        )  # (n_documents, max(sentences_per_document), 2 * sentence_rnn_size)
-        documents = documents.sum(dim=1)  # (n_documents, 2 * sentence_rnn_size)
-
-        # Also re-arrange word_alphas (SENTENCES -> DOCUMENTS)
-        word_alphas, _ = pad_packed_sequence(
-            PackedSequence(
-                data=word_alphas,
-                batch_sizes=packed_sentences.batch_sizes,
-                sorted_indices=packed_sentences.sorted_indices,
-                unsorted_indices=packed_sentences.unsorted_indices,
-            ),
-            batch_first=True,
-        )  # (n_documents, max(sentences_per_document), max(words_per_sentence))
+        packed_word_alphas = PackedSequence(
+            data=word_alphas,
+            batch_sizes=packed_sentences.batch_sizes,
+            sorted_indices=packed_sentences.sorted_indices,
+            unsorted_indices=packed_sentences.unsorted_indices,
+        )
+        word_alphas, _ = pad_packed_sequence(packed_word_alphas, batch_first=True)
 
         return documents, word_alphas, sentence_alphas
 
@@ -347,12 +299,8 @@ class WordAttention(nn.Module):
         super(WordAttention, self).__init__()
 
         self.embeddings = embedding_layer
-
-        # Fine tune embedding layer
         for p in self.embeddings.parameters():
             p.requires_grad = fine_tune_embeddings
-
-        # Bidirectional word-level RNN
         self.word_rnn = nn.GRU(
             input_size=embedding_size,
             hidden_size=word_rnn_size,
@@ -361,62 +309,39 @@ class WordAttention(nn.Module):
             dropout=dropout,
             batch_first=True,
         )
-
-        # Word-level attention network
-        self.word_attention = nn.Linear(
-            in_features=2 * word_rnn_size, out_features=word_att_size
-        )
-
-        # Word context vector to take dot-product with
-        self.word_context_vector = nn.Linear(
-            in_features=word_att_size, out_features=1, bias=False
-        )
-
-        # Dropout
+        self.word_attention = nn.Linear(in_features=2 * word_rnn_size, out_features=word_att_size)
+        self.word_context_vector = nn.Linear(in_features=word_att_size, out_features=1, bias=False)
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, sentences, words_per_sentence):
+    def forward(self, words, words_per_sentence):
         """
         Forward propagation.
 
-        :param sentences: encoded sentence-level data, a tensor of dimension (n_sentences, word_pad_len, emb_size)
+        :param words: tokenized and encoded sentences, a tensor of dimension (n_sentences, word_pad_len, emb_size)
         :param words_per_sentence: sentence lengths, a tensor of dimension (n_sentences)
         :return: sentence embeddings, attention weights of words
         """
 
-        # Get word embeddings, apply dropout
-        sentences = self.embeddings(sentences)
-        if type(sentences) is tuple:
-            sentences = sentences[0]
-        sentences = self.dropout(sentences)  # (n_sentences, word_pad_len, emb_size)
+        # Get word embeddings
+        words = self.embeddings(words)
+        if type(words) == tuple:
+            words = words[0]
+        words = self.dropout(words)
 
-        # Re-arrange as words by removing word-pads (SENTENCES -> WORDS)
+        # Pack words to apply attention
         packed_words = pack_padded_sequence(
-            sentences,
+            words,
             lengths=words_per_sentence.tolist(),
             batch_first=True,
             enforce_sorted=False,
-        )  # a PackedSequence object, where 'data' is the flattened words (n_words, word_emb)
+        )
+        packed_words, _ = self.word_rnn(packed_words)
 
-        # Apply the word-level RNN over the word embeddings (PyTorch automatically applies it on the PackedSequence)
-        packed_words, _ = self.word_rnn(
-            packed_words
-        )  # a PackedSequence object, where 'data' is the output of the RNN (n_words, 2 * word_rnn_size)
+        # Apply word attention
+        att_w = torch.tanh(self.word_attention(packed_words.data))
+        att_w = self.word_context_vector(att_w).squeeze(1)
+        att_w = torch.exp(att_w - att_w.max())
 
-        # Find attention vectors by applying the attention linear layer on the output of the RNN
-        att_w = self.word_attention(packed_words.data)  # (n_words, att_size)
-        att_w = torch.tanh(att_w)  # (n_words, att_size)
-        # Take the dot-product of the attention vectors with the context vector (i.e. parameter of linear layer)
-        att_w = self.word_context_vector(att_w).squeeze(1)  # (n_words)
-
-        # Compute softmax over the dot-product manually
-        # Manually because they have to be computed only over words in the same sentence
-
-        # First, take the exponent
-        max_value = (att_w.max())  # scalar, for numerical stability during exponent calculation
-        att_w = torch.exp(att_w - max_value)  # (n_words)
-
-        # Re-arrange as sentences by re-padding with 0s (WORDS -> SENTENCES)
         att_w, _ = pad_packed_sequence(
             PackedSequence(
                 data=att_w,
@@ -424,16 +349,13 @@ class WordAttention(nn.Module):
                 sorted_indices=packed_words.sorted_indices,
                 unsorted_indices=packed_words.unsorted_indices,
             ),
-            batch_first=True,)  # (n_sentences, max(words_per_sentence))
+            batch_first=True,
+        )
 
-        # Calculate softmax values as now words are arranged in their respective sentences
-        word_alphas = att_w / torch.sum(att_w, dim=1, keepdim=True)  # (n_sentences, max(words_per_sentence))
-
-        # Similarly re-arrange word-level RNN outputs as sentences by re-padding with 0s (WORDS -> SENTENCES)
-        sentences, _ = pad_packed_sequence(packed_words, batch_first=True)  # (n_sentences, max(words_per_sentence), 2 * word_rnn_size)
-
-        # Find sentence embeddings
-        sentences = sentences * word_alphas.unsqueeze(2)  # (n_sentences, max(words_per_sentence), 2 * word_rnn_size)
-        sentences = sentences.sum(dim=1)  # (n_sentences, 2 * word_rnn_size)
+        # Generate sentence embeddings
+        word_alphas = att_w / torch.sum(att_w, dim=1, keepdim=True)
+        sentences, _ = pad_packed_sequence(packed_words, batch_first=True)
+        sentences = sentences * word_alphas.unsqueeze(2)
+        sentences = sentences.sum(dim=1)
 
         return sentences, word_alphas
