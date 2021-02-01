@@ -6,7 +6,7 @@ The HAN uses attention at both the sentence level and the word level and we can 
 
 Below are the results for YahooAnswers dataset, using HuggingFace's DistilRoberta for tokenizing and frozen word embedding word and sentence attention layers added on. 
 
-![HANYH](img/han.jpg?raw=true "Title")
+![HANYH](img/han.png?raw=true "Title")
 
 Sources:
 
